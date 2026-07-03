@@ -1,124 +1,225 @@
 # Sales Manager Attendance Agent
 
-A real-time operational dashboard for monitoring field employee attendance, built with React, TypeScript, and Google Sheets as the data backend. Tracks employee check-ins, WhatsApp responses, and location sharing through an automated n8n workflow pipeline.
+A field employee attendance monitoring system powered by **n8n** workflow automation, Google Sheets, WhatsApp Cloud API, and Google Gemini AI. The n8n workflow handles scheduling, message delivery, AI-powered response analysis, GPS verification, and deduplication — while a React dashboard visualizes everything in real time.
 
-## Features
+## Architecture
 
-- **Attendance Log** — Full event log of CHECKIN and REMINDER triggers with sortable columns, search, filtering, and clickable Google Maps links for target locations
-- **Reply Tracking** — Live WhatsApp response monitoring with 30-minute countdown timers, response time badges, and shared employee GPS coordinates
-- **Analytics** — Interactive charts including attendance distribution (donut), success rate (radial gauge), response time (bar), weekly trends (area), hourly activity (grouped bar), and location breakdown
-- **Processed Events** — Deduplication monitoring with duplicate detection, pagination, and event timeline
-- **Timeline** — Chronological workflow activity feed with 8 color-coded event types and scroll-triggered animations
-- **System Monitoring** — Health indicators for n8n workflows, Google Sheets sync, WhatsApp API, and connected integrations with endpoints and status
-- **Landing Page** — Marketing page with parallax hero, live dashboard preview, and feature showcase
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                          n8n Workflow Engine                        │
+│                                                                     │
+│  ┌──────────────┐   ┌──────────────┐   ┌────────────────────────┐  │
+│  │  Attendance   │   │   WhatsApp   │   │   Monitor Trigger      │  │
+│  │  Scheduler    │   │   Reply      │   │   (timeout + GPS)      │  │
+│  │  (every sec)  │   │   Listener   │   │   (every minute)       │  │
+│  └──────┬───────┘   └──────┬───────┘   └──────────┬─────────────┘  │
+│         │                  │                       │                │
+│         ▼                  ▼                       ▼                │
+│  ┌──────────────┐   ┌──────────────┐   ┌────────────────────────┐  │
+│  │ Time Matching │   │  GPS Check / │   │ Distance Calculation   │  │
+│  │ + Dedup       │   │  AI Agent    │   │ (Haversine formula)    │  │
+│  └──────┬───────┘   │  (Gemini)    │   └──────────┬─────────────┘  │
+│         │           └──────┬───────┘              │                │
+│         ▼                  ▼                       ▼                │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │                    Google Sheets (4 tabs)                    │  │
+│  │  AttendanceSchedule │ TriggerLog │ ProcessedEvents │ Reply   │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│         │                  │                       │                │
+│         ▼                  ▼                       ▼                │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │              WhatsApp Cloud API (messages)                   │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    React Dashboard (this repo)                      │
+│  Reads Google Sheets via CSV export → displays real-time UI        │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+## n8n Workflow
+
+The core automation lives in [`workflows/Sales_Manager_Agent_Workflow.json`](workflows/Sales_Manager_Agent_Workflow.json). Import it into your n8n instance to get started.
+
+### Workflow Nodes
+
+| # | Node | Type | Purpose |
+|---|---|---|---|
+| 1 | **Attendance Scheduler** | Schedule Trigger | Fires every second to check for due events |
+| 2 | **Get row(s) in sheet** | Google Sheets | Reads all rows from AttendanceSchedule |
+| 3 | **Time Matching Code** | Code | Compares current IST time with scheduled times; filters REMINDER (1–5 min before) and CHECKIN (on-time) |
+| 4 | **Generate EventKey** | Code | Creates dedup key: `{Name}_{Date}_{Time}_{TriggerType}` |
+| 5 | **Get row(s) from ProcessedEvents** | Google Sheets | Fetches already-processed event keys |
+| 6 | **Merge + Filter Node** | Code | Deduplicates — only new events proceed |
+| 7 | **Switch** | Switch | Routes to REMINDER or CHECKIN branch |
+| 8 | **REMINDER / CHECKIN** | Google Sheets | Appends trigger event to TriggerLog sheet |
+| 9 | **Edit Fields** | Set | Formats WhatsApp message body |
+| 10 | **HTTP Request** | HTTP | Sends WhatsApp message via Cloud API |
+| 11 | **Append row in sheet** | Google Sheets | Creates WAITING record in ReplyTracking |
+| 12 | **Append in Events** | Google Sheets | Logs event to ProcessedEvents (dedup) |
+| 13 | **WhatsApp Reply Listener** | WhatsApp Trigger | Webhook listens for employee replies |
+| 14 | **If3** | If | Routes location vs text replies |
+| 15 | **GPS Check** | Code | Extracts lat/lng from location messages |
+| 16 | **AI Agent** | LangChain Agent | Google Gemini analyzes text replies |
+| 17 | **Parse AI output** | Code | Parses AI JSON response |
+| 18 | **Send message** | WhatsApp | Sends AI-generated reply back to employee |
+| 19 | **Monitor Trigger** | Schedule Trigger | Checks for timed-out WAITING records (every minute) |
+| 20 | **If1 + If2** | If | Filters WAITING > 2 minutes |
+| 21 | **HTTP Request3** | HTTP | Sends absence alert to manager |
+| 22 | **Distance Check** | Code | Haversine distance between shared GPS and target |
+| 23 | **If** | If | Checks if distance < 100m |
+| 24 | **Update row** | Google Sheets | Updates status to PRESENT or ABSENT |
+
+### Branches
+
+#### Branch A: Attendance Scheduling
+```
+Schedule Trigger → Read Sheet → Time Match → Generate Key → Dedup → Switch
+  ├─ REMINDER → Log Trigger → Format Message → Send WhatsApp
+  └─ CHECKIN  → Log Trigger → Format Message → Send WhatsApp → Log ReplyTracking → Log ProcessedEvents
+```
+
+#### Branch B: WhatsApp Reply Handling
+```
+WhatsApp Webhook → Route (Location vs Text)
+  ├─ Location → Extract GPS → Update ReplyTracking (SharedLat/SharedLng)
+  └─ Text → AI Agent (Gemini) → Parse JSON → Reply via WhatsApp
+```
+
+#### Branch C: Timeout & GPS Monitoring
+```
+Schedule Trigger (1min) → Read ReplyTracking → Filter WAITING → Check Elapsed > 2min
+  ├─ Yes → Send Manager Alert → Read Shared Location → Read Target Location
+  │        → Haversine Distance Check
+  │          ├─ < 100m → Update PRESENT → Send Confirmation
+  │          └─ >= 100m → Update ABSENT → Send Location Mismatch
+  └─ No → Skip
+```
+
+### AI Agent (Google Gemini)
+
+The AI Agent analyzes employee WhatsApp text responses and decides the next action:
+
+| Employee Response | AI Action | Reply |
+|---|---|---|
+| "Yes, I've reached" / "On the way" / "Traffic" | `REQUEST_LOCATION` | "Please share your current live location" |
+| "I can't come today" | `ABSENT` | "Your manager will be notified" |
+| Excessive delay | `ESCALATE` | "Your delay has been noted" |
+| Unclear message | `ASK_CLARIFICATION` | "Could you tell me if you've reached?" |
+
+### Credentials Required
+
+| Credential | Used By | Purpose |
+|---|---|---|
+| Google Sheets OAuth2 | 8 Google Sheets nodes | Read/write spreadsheet data |
+| WhatsApp OAuth | WhatsApp Reply Listener | Receive employee replies |
+| WhatsApp API | 4 HTTP Request nodes | Send messages to employees |
+| Google Gemini (PaLM) | AI Agent | Analyze employee responses |
+
+## Google Sheets Structure
+
+| Sheet | GID | Purpose |
+|---|---|---|
+| **AttendanceSchedule** | `0` | Employee names, locations, dates, times, target coordinates, phone numbers |
+| **TriggerLog** | `115132173` | CHECKIN and REMINDER trigger events with timestamps |
+| **ProcessedEvents** | `839706631` | Deduplication log of processed event keys |
+| **ReplyTracking** | `275948246` | WhatsApp response status, shared GPS coordinates, distance, final status |
+
+## Dashboard Features
+
+The React dashboard reads Google Sheets via CSV export and displays:
+
+- **Attendance Log** — Full event log with sortable columns, search, filtering, and clickable Google Maps links for target locations
+- **Reply Tracking** — Live WhatsApp response monitoring with 30-minute countdown timers, response time badges, and shared employee GPS coordinates (Google Maps links)
+- **Analytics** — Interactive charts: donut, radial gauge, bar, area, grouped bar, and location breakdown
+- **Processed Events** — Deduplication monitoring with duplicate detection, pagination, and timeline
+- **Timeline** — Chronological workflow activity feed with 8 color-coded event types
+- **System Monitoring** — Health indicators for n8n, Google Sheets, WhatsApp API with uptime charts
 
 ## Tech Stack
 
-| Category | Technology |
+| Layer | Technology |
 |---|---|
-| Framework | React 18, TypeScript 5 |
-| Build Tool | Vite 5 |
-| Styling | Tailwind CSS 3 with glassmorphism utilities |
-| State Management | TanStack React Query v5 (polling, caching) |
-| Animation | Framer Motion 11 |
-| Charts | Recharts 2 |
-| UI Primitives | Radix UI (14 packages) |
-| Routing | React Router DOM 6 |
-| Data Source | Google Sheets CSV export (via CORS proxies) |
-| Hosting | Firebase Hosting |
+| **Automation** | **n8n** (self-hosted workflow engine) |
+| **AI** | Google Gemini (via LangChain agent in n8n) |
+| **Messaging** | WhatsApp Cloud API v23 |
+| **Database** | Google Sheets (CSV export) |
+| **Frontend** | React 18, TypeScript, Vite 5 |
+| **Styling** | Tailwind CSS 3 (glassmorphism) |
+| **Charts** | Recharts 2 |
+| **Animation** | Framer Motion 11 |
+| **State** | TanStack React Query v5 (30s polling) |
+| **Hosting** | Firebase Hosting |
 
 ## Project Structure
 
 ```
-src/
-├── components/
-│   ├── dashboard/        # DashboardLayout, Sidebar
-│   ├── landing/          # Hero, Features
-│   └── ui/               # Badge, Button, Card, Input, Skeleton
-├── data/                 # Mock/fallback data
-├── lib/
-│   ├── api.ts            # Data transformation + business logic
-│   ├── googleSheets.ts   # Sheet CSV fetching, parsing, caching
-│   └── utils.ts          # Helpers (cn, formatDateTime, etc.)
-├── pages/
-│   ├── LandingPage.tsx
-│   ├── OverviewPage.tsx
-│   ├── AttendancePage.tsx
-│   ├── ReplyTrackingPage.tsx
-│   ├── ProcessedEventsPage.tsx
-│   ├── AnalyticsPage.tsx
-│   ├── TimelinePage.tsx
-│   └── MonitoringPage.tsx
-├── types/                # TypeScript interfaces
-├── App.tsx               # Route definitions
-└── main.tsx              # Entry point
-```
-
-## Google Sheets Integration
-
-The dashboard reads data from 4 sheet tabs via CSV export:
-
-| Sheet | GID | Data |
-|---|---|---|
-| AttendanceSchedule | `0` | Employee names, locations, dates, times, target coordinates, phone numbers |
-| Trigger Log | `115132173` | CHECKIN and REMINDER trigger events with timestamps |
-| ProcessedEvents | `839706631` | Deduplication log of processed event keys |
-| ReplyTracking | `275948246` | WhatsApp response status, shared employee coordinates, distance data |
-
-Data is fetched through a CORS proxy chain (`allorigins.win` → `corsproxy.io` → `codetabs.com` → direct) and cached in-memory for 60 seconds. Fallback data is used when fetches fail.
-
-## Data Pipeline
-
-```
-Google Sheets (AttendanceSchedule)
-        ↓
-   n8n Workflows (schedule triggers)
-        ↓
-   WhatsApp Cloud API (messages to employees)
-        ↓
-   Employee replies (YES / location share)
-        ↓
-   Google Sheets (ReplyTracking, TriggerLog, ProcessedEvents)
-        ↓
-   This Dashboard (CSV export → React UI)
+├── workflows/
+│   └── Sales_Manager_Agent_Workflow.json   # n8n workflow (import this)
+├── src/
+│   ├── components/
+│   │   ├── dashboard/        # DashboardLayout, Sidebar
+│   │   ├── landing/          # Hero, Features
+│   │   └── ui/               # Badge, Button, Card, Input, Skeleton
+│   ├── data/                 # Mock/fallback data
+│   ├── lib/
+│   │   ├── api.ts            # Data transformation + business logic
+│   │   ├── googleSheets.ts   # Sheet CSV fetching, parsing, caching
+│   │   └── utils.ts          # Helpers (cn, formatDateTime, etc.)
+│   ├── pages/
+│   │   ├── LandingPage.tsx
+│   │   ├── OverviewPage.tsx
+│   │   ├── AttendancePage.tsx
+│   │   ├── ReplyTrackingPage.tsx
+│   │   ├── ProcessedEventsPage.tsx
+│   │   ├── AnalyticsPage.tsx
+│   │   ├── TimelinePage.tsx
+│   │   └── MonitoringPage.tsx
+│   ├── types/                # TypeScript interfaces
+│   ├── App.tsx               # Route definitions
+│   └── main.tsx              # Entry point
+├── package.json
+├── vite.config.ts
+├── tailwind.config.js
+├── tsconfig.json
+└── firebase.json
 ```
 
 ## Getting Started
 
 ### Prerequisites
 
+- **n8n** instance (self-hosted or cloud)
+- Google Cloud project with Sheets API enabled
+- WhatsApp Cloud API phone number and access token
+- Google Gemini API key
 - Node.js 18+
-- npm or yarn
 
-### Installation
+### 1. Import n8n Workflow
+
+1. Open your n8n instance
+2. Go to **Workflows → Import from File**
+3. Select `workflows/Sales_Manager_Agent_Workflow.json`
+4. Set up the required credentials (Google Sheets, WhatsApp, Gemini)
+5. Update the phone number and sheet ID in the workflow nodes
+6. Activate the workflow
+
+### 2. Set Up Google Sheets
+
+Create a spreadsheet with 4 tabs matching the schema above, or use the existing sheet referenced in the workflow.
+
+### 3. Run the Dashboard
 
 ```bash
 git clone https://github.com/Deepakchandrasekar05/Sales_Manager_Agent.git
 cd Sales_Manager_Agent
 npm install
-```
-
-### Development
-
-```bash
 npm run dev
 ```
 
-### Build
-
-```bash
-npm run build
-```
-
-### Preview Production Build
-
-```bash
-npm run preview
-```
-
-## Deployment
-
-The project is configured for Firebase Hosting:
+### Build & Deploy
 
 ```bash
 npm run build

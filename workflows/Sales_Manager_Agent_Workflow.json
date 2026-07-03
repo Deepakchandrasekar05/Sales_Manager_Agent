@@ -1,0 +1,2232 @@
+{
+  "name": "Sales Manager Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk",
+          "mode": "list",
+          "cachedResultName": "Sales Manager Attendance Sheet",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "AttendanceSchedule",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit#gid=0"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -320,
+        -48
+      ],
+      "id": "51dd3f32-ea34-45ac-b149-b3ff3e8be289",
+      "name": "Get row(s) in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "eyQcfyby1h2mMbWj",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "2f971288-5088-456f-aa66-f5799ebcdbcf",
+                    "leftValue": "={{$json.triggerType}}",
+                    "rightValue": "REMINDER",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "b2808307-05b8-41c8-bbc6-93879c296011",
+                    "leftValue": "={{$json.triggerType}}",
+                    "rightValue": "CHECKIN",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1024,
+        -48
+      ],
+      "id": "4c238f00-58f4-4d8f-9cdf-6875a883be6e",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get Current IST Time\nconst now = new Date();\nconst istNow = new Date(now.toLocaleString(\"en-US\", { timeZone: \"Asia/Kolkata\" }));\nconst currentMinutes = istNow.getHours() * 60 + istNow.getMinutes();\n\nconst output = [];\n\n// 2. Loop through all rows\nfor (const item of $input.all()) {\n    let timeInput = item.json.Time;\n    \n    // Skip empty times\n    if (!timeInput) continue;\n\n    let scheduleMinutes = 0;\n    let isParsed = false;\n\n    // --- PARSING LOGIC (The Fix) ---\n\n    // Case A: Excel Serial Number (e.g. 0.375) or pure Number\n    if (typeof timeInput === 'number') {\n        // 0.5 = 12:00 PM (0.5 * 24 * 60 minutes)\n        const totalMinutes = Math.round(timeInput * 24 * 60);\n        scheduleMinutes = totalMinutes % 1440; // Ensure it fits in 24 hours\n        isParsed = true;\n    } \n    // Case B: String formats (e.g. \"09:00\", \"9:00 AM\")\n    else {\n        let timeStr = String(timeInput).trim();\n\n        // Try AM/PM Match (e.g. \"9:00 AM\")\n        const amPmMatch = timeStr.match(/(\\d{1,2}):(\\d{2})\\s*(AM|PM)/i);\n        if (amPmMatch) {\n            let h = parseInt(amPmMatch[1]);\n            let m = parseInt(amPmMatch[2]);\n            let p = amPmMatch[3].toUpperCase();\n            \n            if (p === 'PM' && h < 12) h += 12;\n            if (p === 'AM' && h === 12) h = 0;\n            \n            scheduleMinutes = (h * 60) + m;\n            isParsed = true;\n        } \n        // Try Standard 24H Match (e.g. \"14:30\")\n        else {\n            const parts = timeStr.split(':');\n            if (parts.length >= 2) {\n                scheduleMinutes = (parseInt(parts[0]) * 60) + parseInt(parts[1]);\n                isParsed = true;\n            }\n        }\n    }\n\n    // If we couldn't parse it, skip this row\n    if (!isParsed) continue;\n\n    // --- MATCHING LOGIC ---\n    \n    const diff = scheduleMinutes - currentMinutes;\n\n    // Reminder: Trigger 1 to 5 minutes BEFORE\n    // (e.g. Schedule 9:05, Current 9:00 -> Diff 5)\n    if (diff >= 1 && diff <= 5) {\n        output.push({ \n            json: { ...item.json, triggerType: \"REMINDER\" } \n        });\n    }\n    // Checkin: Trigger exactly at time or 1 minute late\n    // (e.g. Schedule 9:00, Current 9:00 -> Diff 0)\n    else if (diff >= -1 && diff <= 1) {\n        output.push({ \n            json: { ...item.json, triggerType: \"CHECKIN\" } \n        });\n    }\n}\n\nreturn output;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -96,
+        -48
+      ],
+      "id": "4484af1d-b2d1-4547-bc8f-e6864aa41a07",
+      "name": "Time Matching Code"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk",
+          "mode": "list",
+          "cachedResultName": "Sales Manager Attendance Sheet",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 115132173,
+          "mode": "list",
+          "cachedResultName": "TriggerLog",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit#gid=115132173"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "EmployeeName": "={{$json.EmployeeName}}",
+            "PlaceName": "={{$json.PlaceName}}",
+            "ScheduledTime": "={{$json.Time}}",
+            "TriggerType": "REMINDER",
+            "TriggerTimestamp": "={{$now}}",
+            "Phone": "={{$json.Phone}}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "EmployeeName",
+              "displayName": "EmployeeName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "PlaceName",
+              "displayName": "PlaceName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Phone",
+              "displayName": "Phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ScheduledTime",
+              "displayName": "ScheduledTime",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "TriggerType",
+              "displayName": "TriggerType",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "TriggerTimestamp",
+              "displayName": "TriggerTimestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1248,
+        -240
+      ],
+      "id": "65768e8c-563b-4fad-9a2a-1c98be08155a",
+      "name": "REMINDER",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "eyQcfyby1h2mMbWj",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk",
+          "mode": "list",
+          "cachedResultName": "Sales Manager Attendance Sheet",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 115132173,
+          "mode": "list",
+          "cachedResultName": "TriggerLog",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit#gid=115132173"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "EmployeeName": "={{$json.EmployeeName}}",
+            "PlaceName": "={{$json.PlaceName}}",
+            "ScheduledTime": "={{$json.Time}}",
+            "TriggerType": "CHECKIN",
+            "TriggerTimestamp": "={{ $now }}",
+            "Phone": "={{ $json.Phone }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "EmployeeName",
+              "displayName": "EmployeeName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "PlaceName",
+              "displayName": "PlaceName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Phone",
+              "displayName": "Phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ScheduledTime",
+              "displayName": "ScheduledTime",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "TriggerType",
+              "displayName": "TriggerType",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "TriggerTimestamp",
+              "displayName": "TriggerTimestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1248,
+        144
+      ],
+      "id": "8a4fd959-7f14-48d8-9ebb-a934184770ce",
+      "name": "CHECKIN",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "eyQcfyby1h2mMbWj",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "for (const item of $input.all()) {\n\n  item.json.EventKey =\n    `${item.json.EmployeeName}_${item.json.Date}_${item.json.Time}_${item.json.triggerType}`;\n\n}\n\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        128,
+        -48
+      ],
+      "id": "ed354874-fffc-47ff-a9e4-6dfbab07c40c",
+      "name": "Generate EventKey"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        576,
+        -48
+      ],
+      "id": "61b564a3-acd7-4d8e-97ee-408efabd9694",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "const currentEvents = [];\nconst processedKeys = new Set();\n\nfor (const item of $input.all()) {\n\n  // Attendance events have EmployeeName\n  if (item.json.EmployeeName) {\n    currentEvents.push(item);\n  }\n\n  // ProcessedEvents rows have EventKey\n  else if (item.json.EventKey) {\n    processedKeys.add(item.json.EventKey);\n  }\n\n}\n\nconst output = [];\n\nfor (const event of currentEvents) {\n\n  if (!processedKeys.has(event.json.EventKey)) {\n    output.push(event);\n  }\n\n}\n\nreturn output;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        -48
+      ],
+      "id": "3a24ee7e-a595-44b2-be73-b0abd22297ce",
+      "name": "Filter Node"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk",
+          "mode": "list",
+          "cachedResultName": "Sales Manager Attendance Sheet",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 839706631,
+          "mode": "list",
+          "cachedResultName": "ProcessedEvents",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit#gid=839706631"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "EventKey",
+              "lookupValue": "=EventKey = {{$json.EventKey}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        368,
+        -192
+      ],
+      "id": "70a52b6f-98d3-4a5d-a237-8e28f626f6bb",
+      "name": "Get row(s) from ProcessedEvents",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "eyQcfyby1h2mMbWj",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1248,
+        -48
+      ],
+      "id": "87877958-0b20-4bcf-a30a-0d7b8d2adac7",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk",
+          "mode": "list",
+          "cachedResultName": "Sales Manager Attendance Sheet",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 839706631,
+          "mode": "list",
+          "cachedResultName": "ProcessedEvents",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit#gid=839706631"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "EventKey": "={{ $json.EventKey }}",
+            "Timestamp": "={{ $now }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "EventKey",
+              "displayName": "EventKey",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Timestamp",
+              "displayName": "Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1472,
+        -48
+      ],
+      "id": "16519a37-93ba-4f3a-9a1a-a2ba20296077",
+      "name": "Append in Events",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "eyQcfyby1h2mMbWj",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{$json.reply}}",
+        "options": {
+          "systemMessage": "You are an Attendance Assistant for field employees.\n\nAn employee has received a check-in message asking whether they have reached their assigned workplace.\n\nYour job is to understand the employee's response.\n\nNever mark attendance directly.\n\nInstead decide the next workflow action.\n\nReturn ONLY valid JSON.\n\nPossible actions:\n\nREQUEST_LOCATION\nABSENT\nESCALATE\nASK_CLARIFICATION\n\nRules:\n\n1. If the employee confirms arrival OR says they are on the way OR mentions traffic OR says they'll reach shortly\n\nReturn\n\n{\n\"action\":\"REQUEST_LOCATION\",\n\"reason\":\"Employee is proceeding to the workplace.\",\n\"reply\":\"Thank you. Please share your current live location using WhatsApp so I can verify your attendance.\"\n}\n\n2. If employee clearly says they cannot come\n\nReturn\n\n{\n\"action\":\"ABSENT\",\n\"reason\":\"Employee cannot attend.\",\n\"reply\":\"Thank you for informing us. Your manager will be notified.\"\n}\n\n3. If employee is extremely delayed\n\nReturn\n\n{\n\"action\":\"ESCALATE\",\n\"reason\":\"Delay exceeds acceptable limit.\",\n\"reply\":\"Your delay has been noted and your manager will be informed.\"\n}\n\n4. If the message is unclear\n\nReturn\n\n{\n\"action\":\"ASK_CLARIFICATION\",\n\"reason\":\"Unable to understand.\",\n\"reply\":\"Could you please tell me whether you have reached or are still travelling?\"\n}\n\nReturn JSON only."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        400,
+        432
+      ],
+      "id": "b0a1d5c4-71a9-4dcd-8668-392b220cf29e",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        400,
+        640
+      ],
+      "id": "dcd6f7a8-e5ac-4eb0-b800-5fdd6703bd0c",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "ucFSM9xCLnoRxYBG",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{$json.reply}}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        544,
+        656
+      ],
+      "id": "61415868-1c52-4e23-a920-06772327cd7b",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v23.0/1164263016776077/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer EAAObZAOsniTUBRqpluuQLYNge9OC16ECZCSJb5WwD3L8UrVTl9SHogr62YkEs4Csh8b2qKDxW1RMAZBMW4VjMrZBr5pLtOjUEzolNlZCHpjy9PYzixnmgdt7r0MlWgfdr8ONUENtqt4xv33Xn551YVRqazNCJcjZA0YOa54UdtO3ZCx73JAXPlBYeLXmZBvZC3HSQJsOX1qZAiZAuGcr1aoco3zGeICTgDmN97jSJvF"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "messaging_product",
+              "value": "whatsapp"
+            },
+            {
+              "name": "to",
+              "value": "={{ $json.Phone }}"
+            },
+            {
+              "name": "type",
+              "value": "text"
+            },
+            {
+              "name": "text.body",
+              "value": "={{ $json.message }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1696,
+        192
+      ],
+      "id": "f639b0b5-8fed-4004-a45b-a2a10bd8aa18",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "dde0f7a8-2de8-468c-8f5f-900667097222",
+              "name": "message",
+              "value": "=Attendance Check-In\n\nHave you reached {{$json.PlaceName}}?\n\nReply YES within 2 minutes.",
+              "type": "string"
+            },
+            {
+              "id": "a392d156-2f45-4d76-8099-fb12bb6205b0",
+              "name": "Phone",
+              "value": "={{ $json.Phone }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1472,
+        176
+      ],
+      "id": "050c5ade-66b6-40ea-83b9-be53fdab9477",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "dde0f7a8-2de8-468c-8f5f-900667097222",
+              "name": "message",
+              "value": "=Reminder: Your attendance at {{$json.PlaceName}} is scheduled at {{$json.ScheduledTime}}. Please be ready to check in.",
+              "type": "string"
+            },
+            {
+              "id": "b71ac76b-52ef-4889-8877-1bde2c2b8855",
+              "name": "Phone",
+              "value": "={{ $json.Phone }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1472,
+        -240
+      ],
+      "id": "c9a2b6f5-4cff-4806-ad11-2d0912b7a1b4",
+      "name": "Edit Fields1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v23.0/1164263016776077/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer EAAObZAOsniTUBRqpluuQLYNge9OC16ECZCSJb5WwD3L8UrVTl9SHogr62YkEs4Csh8b2qKDxW1RMAZBMW4VjMrZBr5pLtOjUEzolNlZCHpjy9PYzixnmgdt7r0MlWgfdr8ONUENtqt4xv33Xn551YVRqazNCJcjZA0YOa54UdtO3ZCx73JAXPlBYeLXmZBvZC3HSQJsOX1qZAiZAuGcr1aoco3zGeICTgDmN97jSJvF"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "messaging_product",
+              "value": "whatsapp"
+            },
+            {
+              "name": "to",
+              "value": "={{$json.Phone}}"
+            },
+            {
+              "name": "type",
+              "value": "text"
+            },
+            {
+              "name": "text.body",
+              "value": "={{ $json.message }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1696,
+        -240
+      ],
+      "id": "6f8c96f2-8cc5-483a-aceb-7e59d8a0c34e",
+      "name": "HTTP Request2"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk",
+          "mode": "list",
+          "cachedResultName": "Sales Manager Attendance Sheet",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 275948246,
+          "mode": "list",
+          "cachedResultName": "ReplyTracking",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit#gid=275948246"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "EventKey": "={{$json.EventKey}}",
+            "EmployeeName": "={{$json.EmployeeName}}",
+            "PlaceName": "={{$json.PlaceName}}",
+            "PhoneNumber": "918015210930",
+            "Status": "WAITING",
+            "SentTime": "={{$now}}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "EventKey",
+              "displayName": "EventKey",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "EmployeeName",
+              "displayName": "EmployeeName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "PlaceName",
+              "displayName": "PlaceName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "PhoneNumber",
+              "displayName": "PhoneNumber",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "SentTime",
+              "displayName": "SentTime",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2032,
+        -16
+      ],
+      "id": "2ddcc455-5707-4b70-a9b1-d6c58f2d2cba",
+      "name": "Append row in sheet",
+      "executeOnce": false,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "eyQcfyby1h2mMbWj",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => ({\n  json: {\n    reply: item.json.messages?.[0]?.text?.body\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        352
+      ],
+      "id": "2741b2e0-dcbb-4dd5-ae5a-a5950790ff67",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "e5b8a97d-d029-49d1-ae52-9acee518616a",
+              "leftValue": "={{$json.Distance}}",
+              "rightValue": 100,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1232,
+        848
+      ],
+      "id": "5a6cb09c-25c3-4dd3-ac4d-e039b371e515",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk",
+          "mode": "list",
+          "cachedResultName": "Sales Manager Attendance Sheet",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 275948246,
+          "mode": "list",
+          "cachedResultName": "ReplyTracking",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit#gid=275948246"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Status": "PRESENT",
+            "PhoneNumber": "918015210930"
+          },
+          "matchingColumns": [
+            "PhoneNumber"
+          ],
+          "schema": [
+            {
+              "id": "EventKey",
+              "displayName": "EventKey",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "EmployeeName",
+              "displayName": "EmployeeName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "PlaceName",
+              "displayName": "PlaceName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "PhoneNumber",
+              "displayName": "PhoneNumber",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "SentTime",
+              "displayName": "SentTime",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1440,
+        800
+      ],
+      "id": "efee4b9b-7937-4ae9-8b43-042c7e82dddd",
+      "name": "Update row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "eyQcfyby1h2mMbWj",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        80,
+        1248
+      ],
+      "id": "5ac3e2ec-dff9-4d16-a268-52644fe59af9",
+      "name": "Monitor Trigger"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk",
+          "mode": "list",
+          "cachedResultName": "Sales Manager Attendance Sheet",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 275948246,
+          "mode": "list",
+          "cachedResultName": "ReplyTracking",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit#gid=275948246"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        320,
+        1248
+      ],
+      "id": "98385627-9330-47a2-b53f-67d979d0baaa",
+      "name": "Get row(s) in sheet1",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "eyQcfyby1h2mMbWj",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "7311abb5-0e08-413f-a4b6-71bb5af5b35c",
+              "leftValue": "={{ $json.STATUS }}",
+              "rightValue": "WAITING",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        528,
+        1248
+      ],
+      "id": "5b36e99a-c55d-4a7f-bedb-a984f9e02adf",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const sentTime = new Date($json.SentTime);\nconst now = new Date();\n\nconst elapsedMinutes =\n  (now.getTime() - sentTime.getTime()) /\n  (1000 * 60);\n\nreturn {\n  json: {\n    ...$json,\n    elapsedMinutes\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        816,
+        1232
+      ],
+      "id": "45980f44-15f3-41b5-804f-7467fc29ae00",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d297a107-6e57-4aa7-8973-949f6c047d72",
+              "leftValue": "={{ $json.elapsedMinutes }}",
+              "rightValue": 2,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        992,
+        1232
+      ],
+      "id": "528768cb-022d-4724-92ee-43b2cca8c88c",
+      "name": "If2"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v23.0/1164263016776077/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer EAAObZAOsniTUBRqpluuQLYNge9OC16ECZCSJb5WwD3L8UrVTl9SHogr62YkEs4Csh8b2qKDxW1RMAZBMW4VjMrZBr5pLtOjUEzolNlZCHpjy9PYzixnmgdt7r0MlWgfdr8ONUENtqt4xv33Xn551YVRqazNCJcjZA0YOa54UdtO3ZCx73JAXPlBYeLXmZBvZC3HSQJsOX1qZAiZAuGcr1aoco3zGeICTgDmN97jSJvF"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "messaging_product",
+              "value": "whatsapp"
+            },
+            {
+              "name": "to",
+              "value": "918015210930"
+            },
+            {
+              "name": "type",
+              "value": "text"
+            },
+            {
+              "name": "text.body",
+              "value": "Attendance Alert\n\nEmployee: Ravi\n\nLocation: Government Hospital\n\nNo YES confirmation received\nwithin 2 minutes.\n\nStatus: ABSENT"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1264,
+        1216
+      ],
+      "id": "40341b5b-5a6c-438c-a8e0-a1a6f7b3b325",
+      "name": "HTTP Request3"
+    },
+    {
+      "parameters": {
+        "updates": [
+          "messages"
+        ],
+        "options": {}
+      },
+      "type": "n8n-nodes-base.whatsAppTrigger",
+      "typeVersion": 1,
+      "position": [
+        -416,
+        464
+      ],
+      "id": "80ea0cee-33c5-4001-bbfd-128dabf2fb23",
+      "name": "WhatsApp Reply Listener",
+      "webhookId": "1f0ff433-6de5-4f2a-9ae1-1cc8bbd485b7",
+      "credentials": {
+        "whatsAppTriggerApi": {
+          "id": "zChfQ85wnQQnswgY",
+          "name": "WhatsApp OAuth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "seconds"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -544,
+        -48
+      ],
+      "id": "0e52b595-ec92-4ea7-b0a5-7b61c5bec404",
+      "name": "Attendance Scheduler"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "numberInputs": 3,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1856,
+        -32
+      ],
+      "id": "3a00b6c9-bece-44d8-ab14-2a3dd9b51635",
+      "name": "Merge2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n\n  let output = item.json.output;\n\n  output = output\n    .replace(/^```json\\s*/i, \"\")\n    .replace(/^```\\s*/i, \"\")\n    .replace(/\\s*```$/, \"\")\n    .trim();\n\n  return {\n    json: JSON.parse(output)\n  };\n\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        432
+      ],
+      "id": "58590d81-52e0-4d1b-9ead-3caf4da58ab7",
+      "name": "Parse AI output"
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "phoneNumberId": "1164263016776077",
+        "recipientPhoneNumber": "918015210930",
+        "textBody": "={{ $json.reply }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1.1,
+      "position": [
+        976,
+        432
+      ],
+      "id": "f430ed7d-133b-431d-8867-eb1bedc8d244",
+      "name": "Send message and wait for response",
+      "webhookId": "01f611c6-5c60-4e24-a558-36cae7ffa2fb",
+      "credentials": {
+        "whatsAppApi": {
+          "id": "5vVxzqtav7QO3PrH",
+          "name": "WhatsApp account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b432c593-05d7-4c66-a9fb-54ccbd050aa2",
+              "leftValue": "={{ $json.messages[0].type }}",
+              "rightValue": "location",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -240,
+        464
+      ],
+      "id": "81a09420-52c8-4762-b61d-86b3a61b319f",
+      "name": "If3"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk",
+          "mode": "list",
+          "cachedResultName": "Sales Manager Attendance Sheet",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 275948246,
+          "mode": "list",
+          "cachedResultName": "ReplyTracking",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit#gid=275948246"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "PhoneNumber",
+              "lookupValue": "={{$json.PhoneNumber}}"
+            },
+            {
+              "lookupColumn": "Status",
+              "lookupValue": "WAITING"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        304,
+        864
+      ],
+      "id": "87752ef2-9161-475d-bd79-b23dd64fb88b",
+      "name": "Get row(s) in sheet2",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "eyQcfyby1h2mMbWj",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {\n  json: {\n    phoneNumber: $json.messages[0].from,\n    latitude: $json.messages[0].location.latitude,\n    longitude: $json.messages[0].location.longitude\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        864
+      ],
+      "id": "db06bb86-1dd0-401f-99f6-9102cafc8e3a",
+      "name": "GPS Check"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk",
+          "mode": "list",
+          "cachedResultName": "Sales Manager Attendance Sheet",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "AttendanceSchedule",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit#gid=0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "EmployeeName",
+              "lookupValue": "={{$json.EmployeeName}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        528,
+        960
+      ],
+      "id": "99231b0f-28a0-4526-92c8-bb3343756b45",
+      "name": "Get row(s) in sheet3",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "eyQcfyby1h2mMbWj",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function distance(lat1, lon1, lat2, lon2) {\n  const R = 6371000;\n\n  const toRad = deg => deg * Math.PI / 180;\n\n  const dLat = toRad(lat2 - lat1);\n  const dLon = toRad(lon2 - lon1);\n\n  const a =\n    Math.sin(dLat / 2) ** 2 +\n    Math.cos(toRad(lat1)) *\n    Math.cos(toRad(lat2)) *\n    Math.sin(dLon / 2) ** 2;\n\n  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));\n\n  return R * c;\n}\n\nconst items = $input.all();\n\nreturn items.map(item => {\n\n  const actualLat = Number(item.json.SharedLatitude);\n  const actualLon = Number(item.json.SharedLongitude);\n\n  const targetLat = Number(item.json.TargetLatitude);\n  const targetLon = Number(item.json.TargetLongitude);\n\n  const dist = distance(\n    actualLat,\n    actualLon,\n    targetLat,\n    targetLon\n  );\n\n  return {\n    json: {\n      ...item.json,\n      Distance: Math.round(dist)\n    }\n  };\n\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        992,
+        848
+      ],
+      "id": "1bdcd16e-b671-4528-8510-77ca76d47125",
+      "name": "Distance Check"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk",
+          "mode": "list",
+          "cachedResultName": "Sales Manager Attendance Sheet",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 275948246,
+          "mode": "list",
+          "cachedResultName": "ReplyTracking",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit#gid=275948246"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Status": "ABSENT",
+            "PhoneNumber": "918015210930"
+          },
+          "matchingColumns": [
+            "PhoneNumber"
+          ],
+          "schema": [
+            {
+              "id": "EventKey",
+              "displayName": "EventKey",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "EmployeeName",
+              "displayName": "EmployeeName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "PlaceName",
+              "displayName": "PlaceName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "PhoneNumber",
+              "displayName": "PhoneNumber",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "SentTime",
+              "displayName": "SentTime",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1440,
+        1008
+      ],
+      "id": "e4016940-fd91-476b-a20d-91b3bcd08bb6",
+      "name": "Update row in sheet1",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "eyQcfyby1h2mMbWj",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "phoneNumberId": "1164263016776077",
+        "recipientPhoneNumber": "918015210930",
+        "textBody": "=✅ Attendance Verified\n\nYour location matches the assigned workplace.\n\nStatus: PRESENT\n\nThank you.",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1.1,
+      "position": [
+        1744,
+        768
+      ],
+      "id": "0a0989d6-3e77-46ee-8835-d406dbbf4e4c",
+      "name": "Send message and wait for response1",
+      "webhookId": "01f611c6-5c60-4e24-a558-36cae7ffa2fb",
+      "credentials": {
+        "whatsAppApi": {
+          "id": "5vVxzqtav7QO3PrH",
+          "name": "WhatsApp account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "phoneNumberId": "1164263016776077",
+        "recipientPhoneNumber": "918015210930",
+        "textBody": "=⚠️ Attendance could not be verified.\n\nYour current location doesn't match the assigned workplace.\n\nPlease proceed to Government Hospital and share your location again.",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1.1,
+      "position": [
+        1760,
+        1008
+      ],
+      "id": "bea8b5ba-b431-4f47-80a1-a7261f09df19",
+      "name": "Send message and wait for response2",
+      "webhookId": "01f611c6-5c60-4e24-a558-36cae7ffa2fb",
+      "credentials": {
+        "whatsAppApi": {
+          "id": "5vVxzqtav7QO3PrH",
+          "name": "WhatsApp account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        752,
+        848
+      ],
+      "id": "611df8cd-f93b-422f-b001-9ea157773c84",
+      "name": "Merge3"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk",
+          "mode": "list",
+          "cachedResultName": "Sales Manager Attendance Sheet",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 275948246,
+          "mode": "list",
+          "cachedResultName": "ReplyTracking",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ClYnCVujumpuTW5JqI0iGRLAcIcHGyE6crL7JwWWMJk/edit#gid=275948246"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "SharedLatitude": "={{ $json.latitude }}",
+            "SharedLongitude": "={{ $json.longitude }}",
+            "PhoneNumber": "={{ $json.phoneNumber }}"
+          },
+          "matchingColumns": [
+            "PhoneNumber"
+          ],
+          "schema": [
+            {
+              "id": "EventKey",
+              "displayName": "EventKey",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "EmployeeName",
+              "displayName": "EmployeeName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "PlaceName",
+              "displayName": "PlaceName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "PhoneNumber",
+              "displayName": "PhoneNumber",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "SentTime",
+              "displayName": "SentTime",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ReplyType",
+              "displayName": "ReplyType",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "SharedLatitude",
+              "displayName": "SharedLatitude",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "SharedLongitude",
+              "displayName": "SharedLongitude",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Distance",
+              "displayName": "Distance",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "AttemptCount",
+              "displayName": "AttemptCount",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "LocationAttemptCount",
+              "displayName": "LocationAttemptCount",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ProcessedAt",
+              "displayName": "ProcessedAt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "FinalStatus",
+              "displayName": "FinalStatus",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ManagerAlerted",
+              "displayName": "ManagerAlerted",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        112,
+        864
+      ],
+      "id": "3525806a-2a73-4674-acd2-482dd79cc122",
+      "name": "Update row in sheet2",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "eyQcfyby1h2mMbWj",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Get row(s) in sheet": {
+      "main": [
+        [
+          {
+            "node": "Time Matching Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "REMINDER",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CHECKIN",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Time Matching Code": {
+      "main": [
+        [
+          {
+            "node": "Generate EventKey",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate EventKey": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) from ProcessedEvents",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "REMINDER": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CHECKIN": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Filter Node",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Node": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) from ProcessedEvents": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Append in Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse AI output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Update row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update row in sheet1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monitor Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet1": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "If2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If2": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp Reply Listener": {
+      "main": [
+        [
+          {
+            "node": "If3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attendance Scheduler": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet": {
+      "main": [
+        []
+      ]
+    },
+    "Append in Events": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge2": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI output": {
+      "main": [
+        [
+          {
+            "node": "Send message and wait for response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If3": {
+      "main": [
+        [
+          {
+            "node": "GPS Check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPS Check": {
+      "main": [
+        [
+          {
+            "node": "Update row in sheet2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet2": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet3",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet3": {
+      "main": [
+        [
+          {
+            "node": "Merge3",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Distance Check": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update row in sheet": {
+      "main": [
+        [
+          {
+            "node": "Send message and wait for response1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update row in sheet1": {
+      "main": [
+        [
+          {
+            "node": "Send message and wait for response2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge3": {
+      "main": [
+        [
+          {
+            "node": "Distance Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update row in sheet2": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "7c0923d7-d66e-4a0e-80a4-ba4380079cd6",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "75e4a8d5b6b2041c8b02024236a2053d357074e19528e568d17cc52c11244202"
+  },
+  "id": "SXJn1ne9NtwrStXX",
+  "tags": []
+}
