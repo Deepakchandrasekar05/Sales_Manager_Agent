@@ -25,7 +25,6 @@ A real-time operational dashboard for monitoring field employee attendance, buil
 | UI Primitives | Radix UI (14 packages) |
 | Routing | React Router DOM 6 |
 | Data Source | Google Sheets CSV export (via CORS proxies) |
-| Database | Supabase (PostgreSQL, prepared) |
 | Hosting | Firebase Hosting |
 
 ## Project Structure
@@ -40,7 +39,6 @@ src/
 ├── lib/
 │   ├── api.ts            # Data transformation + business logic
 │   ├── googleSheets.ts   # Sheet CSV fetching, parsing, caching
-│   ├── supabase.ts       # Supabase client
 │   └── utils.ts          # Helpers (cn, formatDateTime, etc.)
 ├── pages/
 │   ├── LandingPage.tsx
@@ -117,26 +115,6 @@ npm run build
 ```bash
 npm run preview
 ```
-
-## Environment Variables
-
-Create a `.env` file in the project root (optional — Supabase is prepared but not actively used):
-
-```env
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key
-```
-
-## Supabase Setup (Optional)
-
-Run the migrations in `supabase/migrations/` to create the database schema:
-
-- `attendance_records` — Attendance events
-- `reply_tracking` — WhatsApp response tracking
-- `processed_events` — Deduplication log
-- `timeline_events` — Workflow activity feed
-
-All tables have RLS enabled with public read/write access for single-tenant dashboard use.
 
 ## Deployment
 
