@@ -1,3 +1,11 @@
+# Problem Statement
+ 
+Field employees are sent to scheduled locations across hospitals, schools, and government offices, but there is no automated way to confirm they actually arrived. Manual attendance registers are unreliable, easy to fake, and only reviewed after the fact. By the time a manager notices a no-show, the scheduled visit has already been missed with no record of what happened. There is no real-time alert system that triggers when someone fails to respond or shows up at the wrong place. This creates serious accountability gaps that affect service delivery, compliance, and organizational trust.
+ 
+**Goal:** Build a WhatsApp-based Location Attendance Agent as an automated field verification system that: (1) reads daily visit schedules from Google Sheets, (2) sends check-in prompts to employees at the exact scheduled time, (3) verifies arrival by collecting a live GPS location share, (4) calculates whether the employee is within 500 meters of the target location, and (5) logs real-time attendance status — PRESENT, ABSENT, or WRONG LOCATION — with instant alerts to managers when someone fails to check in.
+ 
+A field employee attendance monitoring system powered by **n8n** workflow automation, Google Sheets, WhatsApp Cloud API, and Google Gemini AI. The n8n workflow handles scheduling, message delivery, AI-powered response analysis, GPS verification, and deduplication — while a React dashboard visualizes everything in real time.
+
 # Sales Manager Attendance Agent
 
 A field employee attendance monitoring system powered by **n8n** workflow automation, Google Sheets, WhatsApp Cloud API, and Google Gemini AI. The n8n workflow handles scheduling, message delivery, AI-powered response analysis, GPS verification, and deduplication — while a React dashboard visualizes everything in real time.
