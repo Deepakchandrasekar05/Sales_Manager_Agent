@@ -85,15 +85,6 @@ The AI Agent analyzes employee WhatsApp text responses and decides the next acti
 | WhatsApp API | 4 HTTP Request nodes | Send messages to employees |
 | Google Gemini (PaLM) | AI Agent | Analyze employee responses |
 
-## Google Sheets Structure
-
-| Sheet | GID | Purpose |
-|---|---|---|
-| **AttendanceSchedule** | `0` | Employee names, locations, dates, times, target coordinates, phone numbers |
-| **TriggerLog** | `115132173` | CHECKIN and REMINDER trigger events with timestamps |
-| **ProcessedEvents** | `839706631` | Deduplication log of processed event keys |
-| **ReplyTracking** | `275948246` | WhatsApp response status, shared GPS coordinates, distance, final status |
-
 ## Dashboard Features
 
 The React dashboard reads Google Sheets via CSV export and displays:
@@ -190,7 +181,6 @@ npm run dev
 
 ```bash
 npm run build
-firebase deploy
 ```
 
 ## License
