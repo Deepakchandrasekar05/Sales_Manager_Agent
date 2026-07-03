@@ -39,39 +39,6 @@ A field employee attendance monitoring system powered by **n8n** workflow automa
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-## n8n Workflow
-
-The core automation lives in [`workflows/Sales_Manager_Agent_Workflow.json`](workflows/Sales_Manager_Agent_Workflow.json). Import it into your n8n instance to get started.
-
-### Workflow Nodes
-
-| # | Node | Type | Purpose |
-|---|---|---|---|
-| 1 | **Attendance Scheduler** | Schedule Trigger | Fires every second to check for due events |
-| 2 | **Get row(s) in sheet** | Google Sheets | Reads all rows from AttendanceSchedule |
-| 3 | **Time Matching Code** | Code | Compares current IST time with scheduled times; filters REMINDER (1–5 min before) and CHECKIN (on-time) |
-| 4 | **Generate EventKey** | Code | Creates dedup key: `{Name}_{Date}_{Time}_{TriggerType}` |
-| 5 | **Get row(s) from ProcessedEvents** | Google Sheets | Fetches already-processed event keys |
-| 6 | **Merge + Filter Node** | Code | Deduplicates — only new events proceed |
-| 7 | **Switch** | Switch | Routes to REMINDER or CHECKIN branch |
-| 8 | **REMINDER / CHECKIN** | Google Sheets | Appends trigger event to TriggerLog sheet |
-| 9 | **Edit Fields** | Set | Formats WhatsApp message body |
-| 10 | **HTTP Request** | HTTP | Sends WhatsApp message via Cloud API |
-| 11 | **Append row in sheet** | Google Sheets | Creates WAITING record in ReplyTracking |
-| 12 | **Append in Events** | Google Sheets | Logs event to ProcessedEvents (dedup) |
-| 13 | **WhatsApp Reply Listener** | WhatsApp Trigger | Webhook listens for employee replies |
-| 14 | **If3** | If | Routes location vs text replies |
-| 15 | **GPS Check** | Code | Extracts lat/lng from location messages |
-| 16 | **AI Agent** | LangChain Agent | Google Gemini analyzes text replies |
-| 17 | **Parse AI output** | Code | Parses AI JSON response |
-| 18 | **Send message** | WhatsApp | Sends AI-generated reply back to employee |
-| 19 | **Monitor Trigger** | Schedule Trigger | Checks for timed-out WAITING records (every minute) |
-| 20 | **If1 + If2** | If | Filters WAITING > 2 minutes |
-| 21 | **HTTP Request3** | HTTP | Sends absence alert to manager |
-| 22 | **Distance Check** | Code | Haversine distance between shared GPS and target |
-| 23 | **If** | If | Checks if distance < 100m |
-| 24 | **Update row** | Google Sheets | Updates status to PRESENT or ABSENT |
-
 ### Branches
 
 #### Branch A: Attendance Scheduling
